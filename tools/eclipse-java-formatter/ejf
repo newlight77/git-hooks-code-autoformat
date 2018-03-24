@@ -1,24 +1,92 @@
-#!/bin/sh
-
+#!/bin/bash
+#############################################
+## Global variables
+#############################################
 set -o noclobber
 set -o errexit
 set -o nounset
 
-[ "$#" -lt 2 ] && { echo >&2 'usage: ejf <file1.java> <file2.java> ...'; exit 3; }
+if [ -x /usr/bin/tput ]; then
+  red=`tput setaf 1` # error
+  green=`tput setaf 2` # nice
+  yellow=`tput setaf 3` # warning
+  blue=`tput setaf 4` # info
+  purple=`tput setaf 5` # command
+  teal=`tput setaf 6` # detail
+  white=`tput setaf 7` #
+  reset=`tput sgr0`
+fi
 
 dir="$(cd "$(dirname "$0")"; pwd -P)"
 
-styleUrl="https://raw.githubusercontent.com/google/styleguide/gh-pages/eclipse-java-google-style.xml"
-styleFile="$(echo "$styleUrl" | sed -re 's/^.*\/([^\/]+)$/\1/')"
-curl -f -L -# -o "$styleFile" "$styleUrl" || { rm "$file"; exit 1; }
+CODE_STYLE="eclipse-java-google-style.xml"
 
-src="$dir/src/ejf/Main.java"
-bin="$dir/bin/ejf-jar-with-dependencies.jar"
-cls="$dir/bin/ejf/Main.class"
-if [ "$src" -nt "$cls" ] ; then
-  echo "Recompiling $src ..."
-  javac -d "$bin" "$src"
-  touch -r "$src" "$cls"
+
+#############################################
+## Functions
+#############################################
+
+usage() {
+  echo "${reset} Usage: $0 [options] [file1.java file2.java ...] ${reset}"
+  echo ""
+  echo "${blue} Options:   ${reset}"
+  echo "${blue}          -c, --code-style =filename     specifying code-style e.g. code-style.xml ${reset}"
+  echo "${blue}          -h, --help                     help ${reset}"
+  exit 1
+}
+
+checkError() {
+    out="$1"
+    if [[ $out =~ ^.*CAUTION.*$ ]]; then
+        echo "${red} Error: there are unformatted file"
+        echo "$out"
+        exit 1
+    fi
+    exit 0
+}
+
+#############################################
+## Check arguments
+#############################################
+if [[ $# -lt 1 ]]; then
+    echo "${red} Error : invalid parameter !" >&2
+    usage
+    exit 1
 fi
 
-java -cp "$bin" ejf.Main "$styleFile" "$@"
+for i in "$@"
+  do
+    case $i in
+      -c=*|--code-style=*)    CODE_STYLE="${i#*=}" ; shift;;
+      -h|--help)              usage            ;;
+    esac
+done
+
+
+jar="$dir/bin/ejf-jar-with-dependencies.jar"
+codeStyleParam="-DcodeStyle=$dir/$CODE_STYLE"
+main="ejf.Main"
+patterns="\.java$"
+
+
+#############################################
+## Run
+#############################################
+
+# filtering files to keep only java files
+files=""
+for file in $@ ; do
+  matched=$(echo "$file" | grep -Ei "$patterns")
+  if [[ -f $matched ]] ; then
+    files="$files $matched"
+  fi
+done
+
+JAVA_OPTS="$codeStyleParam"
+echo ${blue}
+java $JAVA_OPTS -cp $jar $main $files | tee $dir/tmp.log
+echo ${reset}
+
+# echo ${teal} $(cat $dir/tmp.log) ${reset}
+
+checkError $(cat $dir/tmp.log)
